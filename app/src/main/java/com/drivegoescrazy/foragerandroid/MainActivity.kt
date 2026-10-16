@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import java.io.InputStream
 import java.util.Locale
 
 class MainActivity : Activity() {
@@ -31,7 +32,7 @@ class MainActivity : Activity() {
             textSize = 25f
         })
         status = TextView(this).apply {
-            text = "Step 1: select the folder containing your Linux Forager installation. The app will inspect it and report what it finds."
+            text = "Select your Linux Forager installation. The app will identify the game format and tell you whether these files can be converted with the available runtime."
             textSize = 16f
             setPadding(0, 18, 0, 18)
         }
@@ -71,28 +72,33 @@ class MainActivity : Activity() {
             // Some document providers do not support persistent grants.
         }
         chooseButton.isEnabled = false
-        status.text = "Inspecting the Linux game files…"
-        progress.progress = 5
+        progress.progress = 0
+        status.text = "Inspecting game files…"
         Thread {
-            val result = inspectTree(tree)
+            val result = inspectTree(tree) { value ->
+                runOnUiThread { progress.progress = value }
+            }
             runOnUiThread {
-                progress.progress = 100
-                status.text = "Analysis finished"
+                status.text = "File analysis complete — no APK has been generated"
                 report.text = result
                 chooseButton.isEnabled = true
             }
         }.start()
     }
 
-    private fun inspectTree(tree: Uri): String {
+    private fun inspectTree(tree: Uri, onProgress: (Int) -> Unit): String {
         val output = mutableListOf<String>()
         val likelyFiles = mutableListOf<String>()
         val queue = ArrayDeque<Uri>()
         var visited = 0
         var totalBytes = 0L
+        var hasGameUnx = false
+        var hasDataWin = false
+        var hasLinuxExecutable = false
+        var hasForagerName = false
         var hasUnityData = false
         var hasUnityPlayer = false
-        var hasForagerName = false
+        var firstError: String? = null
         val limit = 20000
         try {
             val rootId = DocumentsContract.getTreeDocumentId(tree)
@@ -126,37 +132,64 @@ class MainActivity : Activity() {
                             val size = if (cursor.isNull(sizeCol)) 0L else cursor.getLong(sizeCol)
                             totalBytes += size
                             if (lower.contains("forager")) hasForagerName = true
+                            if (lower == "game.unx" || lower == "game.ios") hasGameUnx = true
+                            if (lower == "data.win") hasDataWin = true
                             if (lower == "unityplayer.so" || lower == "libunity.so") hasUnityPlayer = true
-                            if (lower.contains("forager") || lower.endsWith(".so") ||
-                                lower.endsWith(".dll") || lower.endsWith(".exe") ||
-                                lower.endsWith(".win") || lower.endsWith(".pak") ||
-                                lower.endsWith(".dat")) {
+                            if (lower.endsWith(".x86_64") || lower.endsWith(".x86") ||
+                                lower.endsWith(".elf") || lower == "forager") {
+                                if (isLinuxElf(tree, id)) hasLinuxExecutable = true
+                            }
+                            if (lower.contains("forager") || lower == "game.unx" || lower == "data.win" ||
+                                lower.endsWith(".so") || lower.endsWith(".dll") || lower.endsWith(".exe") ||
+                                lower.endsWith(".x86_64") || lower.endsWith(".pak") || lower.endsWith(".dat")) {
                                 likelyFiles.add("$name (${formatBytes(size)})")
                             }
                         }
+                        if (visited % 100 == 0) onProgress((visited / 200).coerceIn(1, 95))
                     }
                 }
             }
         } catch (e: Exception) {
-            output.add("Folder scan error: ${e.javaClass.simpleName}: ${e.message ?: "unknown"}")
+            firstError = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
         }
-        output.add("FILESYSTEM ANALYSIS")
-        output.add("Entries inspected: $visited")
-        output.add("Reported total file size: ${formatBytes(totalBytes)}")
-        output.add("Forager-named files detected: ${if (hasForagerName) "yes" else "not by filename"}")
-        output.add("Unity data directory detected: ${if (hasUnityData) "yes" else "not detected"}")
-        output.add("Unity native library detected: ${if (hasUnityPlayer) "yes" else "not detected"}")
+
+        output.add("INPUT ANALYSIS")
+        output.add("Entries inspected: $visited${if (visited >= limit) " (limit reached)" else ""}")
+        output.add("Reported file size: ${formatBytes(totalBytes)}")
+        output.add("Forager-named files: ${if (hasForagerName) "found" else "not identified"}")
+        output.add("GameMaker game.unx / game.ios: ${if (hasGameUnx) "found" else "not found"}")
+        output.add("GameMaker data.win: ${if (hasDataWin) "found" else "not found"}")
+        output.add("Linux ELF executable: ${if (hasLinuxExecutable) "confirmed" else "not confirmed"}")
+        output.add("Unity data directory: ${if (hasUnityData) "found" else "not found"}")
+        output.add("Unity native library: ${if (hasUnityPlayer) "found" else "not found"}")
+        if (firstError != null) output.add("Scan warning: $firstError")
         output.add("")
         output.add("Potential game/runtime files:")
         output.addAll(likelyFiles.take(80).ifEmpty { listOf("No likely game files found by filename.") })
-        if (visited >= limit) output.add("\nScan stopped at the safety limit of $limit entries.")
         output.add("")
-        output.add("PORT STATUS")
-        output.add("This version analyses files only; it does not yet create a playable APK. A Linux executable needs an Android-compatible game runtime/engine or a tested compatibility layer. Copying Linux files into an APK will not make them run natively.")
-        output.add("If this is a Unity Linux build, the Unity data folder alone is not an Android project. The original project/source or a suitable compatibility runtime must be available before a real port can be implemented.")
+        output.add("CONVERSION RESULT")
+        output.add("No APK was created. This app does not yet contain a compatible GameMaker runtime or an APK packaging/build engine.")
+        output.add("A Linux executable is compiled for Linux and cannot be made Android-native by renaming it or placing it inside an APK. Forager has GameMaker builds that use platform-specific native code; if this copy is a YYC/native build, its game logic cannot be recovered from the executable by a file converter.")
+        output.add("A real playable port needs the original GameMaker project/source or a verified compatible Android runner plus game data that runner supports. This build deliberately does not output a fake APK.")
         output.add("")
-        output.add("No game files were changed.")
+        output.add("No source files were modified.")
+        onProgress(100)
         return output.joinToString("\n")
+    }
+
+    private fun isLinuxElf(tree: Uri, documentId: String): Boolean {
+        return try {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, documentId)
+            contentResolver.openInputStream(uri)?.use { stream: InputStream ->
+                val header = ByteArray(5)
+                val count = stream.read(header)
+                count >= 5 && header[0] == 0x7f.toByte() &&
+                    header[1] == 'E'.code.toByte() && header[2] == 'L'.code.toByte() &&
+                    header[3] == 'F'.code.toByte()
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun formatBytes(value: Long): String {
