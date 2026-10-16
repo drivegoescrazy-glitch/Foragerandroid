@@ -1,7 +1,18 @@
-# Forager Android Porter
+# Forager Android Companion
 
-Initial project status: this repository was empty when inspected. A playable Android port cannot be produced by packaging a Linux executable alone. The Linux game build must first be identified so that an Android-compatible engine/runtime or native port can be implemented.
+This project currently provides:
+- A button to launch the official Android edition of Forager if it is installed.
+- If it is not installed, the same button opens its Google Play listing.
+- A folder scanner for a Linux Forager installation that reports likely game files and ELF executables.
 
-Planned workflow: select the user's legally obtained Linux game folder, inspect its executable format/architecture/engine/libraries, select a compatible porting path, then build and test an Android APK.
+## Important limitation
 
-Do not claim the game has been ported until gameplay, audio, controls, and save handling are verified on Android.
+The Linux files are **not converted into an Android APK** by this app. Forager's GameMaker YYC/native build includes platform-specific machine code. Merely repackaging the Linux x86_64 executable as an APK will not make it run on Android/ARM64. The open-source Butterscotch runner does not support Forager's YYC build. A true custom port would require an Android-compiled game build or a full Linux execution/emulation stack with graphics/audio integration and testing on the target handheld.
+
+## Current use
+
+1. Install the app.
+2. Tap **Open / Install Forager for Android** to open the native Android version if present, or the Play Store listing if not.
+3. Tap **Analyze Linux Forager folder** to inspect a local Linux copy. This scan is diagnostic only; it does not modify your files or build a game APK.
+
+The native Android edition is separate from the Linux Steam files. This project does not bundle game content.
