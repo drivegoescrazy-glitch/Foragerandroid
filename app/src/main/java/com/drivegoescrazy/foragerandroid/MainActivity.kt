@@ -1,6 +1,7 @@
 package com.drivegoescrazy.foragerandroid
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -19,7 +20,10 @@ class MainActivity : Activity() {
     private lateinit var report: TextView
     private lateinit var progress: ProgressBar
     private lateinit var chooseButton: Button
+    private lateinit var playButton: Button
     private val folderRequest = 1001
+    private val officialPackage = "com.humblebundle.forager"
+    private val officialStoreUrl = "https://play.google.com/store/apps/details?id=com.humblebundle.forager"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,17 +32,22 @@ class MainActivity : Activity() {
             setPadding(24, 28, 24, 24)
         }
         root.addView(TextView(this).apply {
-            text = "Forager Android Porter"
+            text = "Forager Android Companion"
             textSize = 25f
         })
         status = TextView(this).apply {
-            text = "Select your Linux Forager installation. The app will identify the game format and tell you whether these files can be converted with the available runtime."
+            text = "Forager's Linux executable cannot be converted into an Android APK by copying files. For a playable version, the reliable route is the Android release. This companion can open it if installed, or open its store listing."
             textSize = 16f
             setPadding(0, 18, 0, 18)
         }
         root.addView(status)
+        playButton = Button(this).apply {
+            text = "Open / Install Forager for Android"
+            setOnClickListener { openOfficialForager() }
+        }
+        root.addView(playButton)
         chooseButton = Button(this).apply {
-            text = "Select Linux Forager folder"
+            text = "Analyze Linux Forager folder"
             setOnClickListener {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -61,6 +70,23 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    private fun openOfficialForager() {
+        val launchIntent = packageManager.getLaunchIntentForPackage(officialPackage)
+        if (launchIntent != null) {
+            try {
+                startActivity(launchIntent)
+                return
+            } catch (_: ActivityNotFoundException) {
+                // Fall through to the store listing.
+            }
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$officialPackage")))
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(officialStoreUrl)))
+        }
+    }
+
     @Deprecated("Deprecated API retained for broad Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -72,6 +98,7 @@ class MainActivity : Activity() {
             // Some document providers do not support persistent grants.
         }
         chooseButton.isEnabled = false
+        playButton.isEnabled = false
         progress.progress = 0
         status.text = "Inspecting game files…"
         Thread {
@@ -79,9 +106,10 @@ class MainActivity : Activity() {
                 runOnUiThread { progress.progress = value }
             }
             runOnUiThread {
-                status.text = "File analysis complete — no APK has been generated"
+                status.text = "Analysis complete. No conversion was attempted."
                 report.text = result
                 chooseButton.isEnabled = true
+                playButton.isEnabled = true
             }
         }.start()
     }
@@ -167,12 +195,14 @@ class MainActivity : Activity() {
         output.add("Potential game/runtime files:")
         output.addAll(likelyFiles.take(80).ifEmpty { listOf("No likely game files found by filename.") })
         output.add("")
-        output.add("CONVERSION RESULT")
-        output.add("No APK was created. This app does not yet contain a compatible GameMaker runtime or an APK packaging/build engine.")
-        output.add("A Linux executable is compiled for Linux and cannot be made Android-native by renaming it or placing it inside an APK. Forager has GameMaker builds that use platform-specific native code; if this copy is a YYC/native build, its game logic cannot be recovered from the executable by a file converter.")
-        output.add("A real playable port needs the original GameMaker project/source or a verified compatible Android runner plus game data that runner supports. This build deliberately does not output a fake APK.")
+        output.add("WHY CONVERSION IS NOT AVAILABLE")
+        output.add("This Linux folder does not include an Android-compatible Forager game executable. Forager's GameMaker YYC/native build contains platform-specific machine code; an Android APK cannot turn x86_64 Linux code into ARM64 Android code by renaming or repackaging it.")
+        output.add("The open-source Butterscotch GameMaker runner does not support Forager's YYC build. A true custom APK would require an Android-compiled Forager build or a complete Linux x86_64 emulation/graphics/audio environment and device testing.")
         output.add("")
-        output.add("No source files were modified.")
+        output.add("PLAYABLE PATH")
+        output.add("Use 'Open / Install Forager for Android' above. If the official Android app is installed, it launches it; otherwise the button opens its store listing. This is separate from the Linux files selected here.")
+        output.add("")
+        output.add("No source files were modified, and no APK was created from the Linux folder.")
         onProgress(100)
         return output.joinToString("\n")
     }
